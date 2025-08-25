@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",                // modern Node.js runtime
+    "module": "NodeNext",              // supports ESM imports
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",                  // compiled JS output folder
+    "rootDir": "src",                  // where your TS lives
+    "esModuleInterop": true,           // allow import/export compatibility
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "sourceMap": true,                 // useful for debugging
+    "inlineSources": true              // helpful in stack traces
+  },
+  "include": ["src/**/*.mts"],
+  "exclude": ["node_modules", "dist"]
+}

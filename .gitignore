@@ -1,0 +1,11 @@
+# Node.js
+node_modules/
+dist/
+secrets/
+npm-debug.log
+.env
+.idea/
+package-lock.json
+
+# TypeScript
+*.tsbuildinfo
