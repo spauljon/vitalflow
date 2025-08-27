@@ -1,10 +1,10 @@
-import { ChatOpenAI } from "@langchain/openai";
-import { StructuredOutputParser } from "@langchain/core/output_parsers";
-import { z } from "zod";
+import {ChatOpenAI} from "@langchain/openai";
+import {StructuredOutputParser} from "@langchain/core/output_parsers";
+import {z} from "zod";
+import {contentToString} from "./aiShared.mjs";
 
-/** The LLM returns a safe, structured decision */
 const PlannerSchema = z.object({
-  route: z.enum(["fetch", "summarize", "alert", "unknown"]),
+  route: z.enum(["metrics", "fetch", "summarize", "alert", "unknown"]),
   rationale: z.string(),
   /** Only set fields you are certain about. Never invent PHI. */
   params_patch: z
@@ -17,7 +17,6 @@ const PlannerSchema = z.object({
       maxItems: z.number().int().optional()
     })
     .default({}),
-  /** Which fields are still needed before "fetch" can run */
   missing: z.array(z.enum(["patientId", "codes", "since", "until"])).default([])
 });
 
@@ -26,13 +25,21 @@ const parser = new StructuredOutputParser(PlannerSchema);
 const SYSTEM = `
 You are a routing planner in a clinical data workflow. 
 Decide the next step and optionally add safe parameter patches.
+
 Rules:
 - NEVER invent patient identifiers or dates.
 - Only set params you are certain about from the user's query/context.
-- Prefer "fetch" when patientId + codes are present or can be inferred with high confidence.
-- Use "summarize" when there's no need to fetch (e.g., summarizing existing bundle).
-- Use "alert" if the request clearly asks to check threshold flags.
+
+Routing:
+- Use "fetch" when patientId + codes are present or can be inferred with high confidence,
+  and the user is asking for observations to be retrieved for further processing.
+- Use "metrics" when the user explicitly asks to see **raw observations or tabular metrics** 
+  (e.g., "raw values", "metrics table", "show readings", "export as CSV/JSON").
+- Use "summarize" when the request is about summarizing or analyzing already-fetched 
+  observations/trends rather than listing the raw values.
+- Use "alert" if the request clearly asks to check threshold flags or highlight abnormal values.
 - If unsure, set route="unknown" and list needed fields in "missing".
+
 Return ONLY the JSON specified by the schema.
 `;
 
@@ -64,13 +71,18 @@ export function makePlannerNode<StateType extends {
   return async function planner(
     s: StateType
   ): Promise<StateType> {
+    const q = s.query.toLowerCase();
+    if (q.includes("metrics") || q.includes("table")) {
+      return { ...s, route: "metrics" };
+    }
+
     try {
       const res = await llm.invoke([
         { role: "system", content: SYSTEM },
         { role: "user", content: userPrompt(s.query, s.params) }
       ]);
 
-      const out = await parser.parse(String(res.content ?? ""));
+      const out = await parser.parse(contentToString(res));
       // Merge params conservatively: patches win only where specified
       const merged = { ...(s.params ?? {}), ...(out.params_patch ?? {}) };
 

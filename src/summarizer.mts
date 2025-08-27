@@ -1,21 +1,23 @@
-import type {AIMessageChunk} from "@langchain/core/messages";
 import type {RunnableConfig} from "@langchain/core/runnables";
 import {ChatOpenAI} from "@langchain/openai";
-import {bucketSeries, computeStats, flagsFromStats, type Frequency, type Series} from "./trend.mjs";
+import {
+  bucketSeries,
+  computeStats,
+  flagsFromStats,
+  type Frequency,
+  type Series,
+  Trends
+} from "./trend.mjs";
+import {metricDetails} from "./metrics.mjs";
+import {contentToString} from "./aiShared.mjs";
 
-type SummarizerStateTrends = {
-  series: Series[];
-  stats: ReturnType<typeof computeStats>[];
-  flags: ReturnType<typeof flagsFromStats>;
-  raw: { fetchedCount: number };
-  query: any;
-};
-
-type SummarizerState = {
+export type SummarizerState = {
   params?: { patientId?: string; codes?: string[] };
-  trends?: SummarizerStateTrends;
+  trends?: Trends;
   bundle?: { entry?: any[] };
   summary?: string;
+  route?: "summarize" | "metrics" | "unknown";
+
 };
 
 function createSeries(by: Map<string, {
@@ -74,27 +76,22 @@ function observationsToSeries(items: any[], requestedCodes: string[]): Series[] 
   return createSeries(by, requestedCodes);
 }
 
-function deterministicSummary(trendsLike: {
-  series: Series[];
-  stats: ReturnType<typeof computeStats>[];
-  flags: ReturnType<typeof flagsFromStats>;
-  raw?: { fetchedCount?: number };
-}) {
-  const nSeries = trendsLike.series.length;
-  const nPoints = trendsLike.series.reduce((a, s) => a + s.points.length, 0);
+function deterministicSummary(trends: Trends) {
+  const nSeries = trends.series.length;
+  const nPoints = trends.series.reduce((a, s) => a + s.points.length, 0);
   const lines = [
     `**Data coverage:** ${nPoints} points across ${nSeries} codes.`,
   ];
-  if (trendsLike.flags?.length) {
+  if (trends.flags?.length) {
     lines.push("**Flags:**");
-    for (const f of trendsLike.flags) {
+    for (const f of trends.flags) {
       lines.push(`- [${f.severity}] ${f.rule} — ${f.evidence}`);
     }
   } else {
     lines.push("No safety flags detected.");
   }
   // add last values
-  for (const st of trendsLike.stats) {
+  for (const st of trends.stats) {
     if (st.latest != null) {
       lines.push(
         `- ${st.display ?? st.code}: latest ${st.latest}${st.unit ? " " + st.unit : ""} @ ${st.latestAt ?? "unknown"}`);
@@ -105,7 +102,7 @@ function deterministicSummary(trendsLike: {
 
 async function summarizeTrends(llm: ChatOpenAI | undefined,
                                s: SummarizerState,
-                               trends: SummarizerStateTrends,
+                               trends: Trends,
                                pid: string | undefined) {
   if (!llm) {
     return {...s, summary: deterministicSummary(trends)};
@@ -140,17 +137,6 @@ Write a brief summary:
   }
 }
 
-function contentToString(res: AIMessageChunk) {
-  let text: string;
-  if (typeof res.content === "string") {
-    return res.content;
-  } else if (Array.isArray(res.content)) {
-    return res.content.map(c => ((c as any).text ?? "")).join("\n");
-  } else {
-    return (res.content as any)?.text ?? "";
-  }
-}
-
 async function summarizeObservations(items: any[], s: SummarizerState,
                                      bucketForFallback: "auto" | "hourly" | "daily" | "weekly",
                                      llm: ChatOpenAI | undefined,
@@ -160,9 +146,9 @@ async function summarizeObservations(items: any[], s: SummarizerState,
   const stats = series.map(computeStats);
   const flags = flagsFromStats(stats);
 
-  const trendsLike = {series, stats, flags, raw: {fetchedCount: items.length}};
+  const trends: Trends = {series, stats, flags, raw: {fetchedCount: items.length}};
   if (!llm) {
-    return {...s, summary: deterministicSummary(trendsLike)};
+    return {...s, summary: deterministicSummary(trends)};
   }
   const prompt = [
     {
@@ -189,9 +175,9 @@ Write a brief summary:
   try {
     const res = await llm.invoke(prompt);
 
-    return {...s, summary: contentToString(res).trim() || deterministicSummary(trendsLike)};
+    return {...s, summary: contentToString(res).trim() || deterministicSummary(trends)};
   } catch {
-    return {...s, summary: deterministicSummary(trendsLike)};
+    return {...s, summary: deterministicSummary(trends)};
   }
 }
 
@@ -215,6 +201,10 @@ export function makeSummarizerNode(opts?: {
     _cfg?: RunnableConfig
   ): Promise<SummarizerState> {
     const pid = s.params?.patientId;
+
+    if (s.route === "metrics") {
+      return metricDetails(s);
+    }
 
     if (s.trends?.series?.length) {
       return await summarizeTrends(llm, s, s.trends, pid);

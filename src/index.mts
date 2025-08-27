@@ -23,12 +23,25 @@ const graph = new StateGraph(State)
   .addNode("planner", planner)
   .addNode("data_agent", dataAgent)
   .addNode("trend", trendWithFetch)
-  .addNode("summarizer", makeSummarizerNode)
+  .addNode("summarizer", makeSummarizerNode(/* call the factory! */))
+
   .addEdge(START, "intake")
   .addEdge("intake", "planner")
-  .addConditionalEdges("planner",
-    (s) => (s.route === "fetch" ? "data_agent" : "trend"))
-  .addEdge("data_agent", "trend")
+
+  .addConditionalEdges("planner", (s) => {
+    if (/trend/i.test(s.query)) {
+      return "trend";
+    }
+
+    if (s.route === "fetch" || s.route === "metrics") {
+      return "data_agent";
+    }
+
+    return "summarizer";
+  })
+
+  .addConditionalEdges("data_agent", (s) => (s.route === "metrics" ? "summarizer" : "trend"))
+
   .addEdge("trend", "summarizer")
   .addEdge("summarizer", END);
 
@@ -38,11 +51,12 @@ const stateGraph = graph.compile({checkpointer: new MemorySaver()});
 (async () => {
   const out = await stateGraph.invoke(
     {
-      query: "patient test-patient-0003 heart rate and blood pressure since 2025-01-01",
+      query: "patient test-patient-0003 trend for blood pressure readings since" +
+        " 2025-01-01",
       params: {}, // optional initial params
     },
     {configurable: {thread_id: "demo-thread-1"}} // enables checkpointing per thread
   );
-  console.log("SUMMARY:", out.summary);
+  console.log("SUMMARY:\n", out.summary);
 })();
 

@@ -317,6 +317,13 @@ export function normalizeToSeries(items: SimpleObs[], requestedCodes: string[]):
   return out;
 }
 
+export type Trends = {
+  series: Series[];
+  stats: ReturnType<typeof computeStats>[];
+  flags: ReturnType<typeof flagsFromStats>;
+  raw: { fetchedCount: number };
+}
+
 export type TrendState = {
   params?: {
     patientId?: string;
@@ -327,13 +334,7 @@ export type TrendState = {
     maxItems?: number;
   };
   bundle?: { entry?: any[] };  // if previous node already fetched observations
-  trends?: {
-    series: Series[];
-    stats: ReturnType<typeof computeStats>[];
-    flags: ReturnType<typeof flagsFromStats>;
-    raw: { fetchedCount: number };
-    query: any;
-  };
+  trends?: Trends;
 };
 
 export type TrendNodeOptions = {
@@ -378,7 +379,9 @@ export function makeTrendNode(opts: TrendNodeOptions = {}) {
         count: Math.min(200, s.params?.count ?? 100),
         maxItems: Math.min(maxItems, s.params?.maxItems ?? maxItems)
       });
-      items = Array.isArray(resp?.items) ? resp.items : [];
+      const payload = McpHttpClient.extractPayload(resp);
+
+      items = Array.isArray(payload?.items) ? payload.items : [];
     } else {
       // no data source available
       return { ...s, trends: undefined };
@@ -395,22 +398,13 @@ export function makeTrendNode(opts: TrendNodeOptions = {}) {
     const flags = flagsFromStats(stats);
 
     // 5) stash results
-    const trends = {
-      query: {
-        patientId,
-        codes,
-        since: s.params?.since,
-        until: s.params?.until,
-        frequency,
-        count: s.params?.count,
-        maxItems: s.params?.maxItems
-      },
+    const trends: Trends = {
       series,
       stats,
       flags,
-      raw: { fetchedCount: items.length }
+      raw: { fetchedCount: items.length },
     };
 
-    return { ...s, trends };
+    return { params: s.params, trends };
   };
 }

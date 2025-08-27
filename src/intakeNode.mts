@@ -1,7 +1,7 @@
 // Minimal, dependency-free intake agent.
 // Goal: turn free text into a normalized query for the planner/data agent.
 
-export type Intent = "fetch" | "summarize" | "unknown";
+export type Intent = "metrics" | "fetch" | "summarize" | "unknown";
 
 export interface QueryParams {
   patientId?: string;

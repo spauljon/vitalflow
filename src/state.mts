@@ -1,5 +1,6 @@
 import {Annotation} from "@langchain/langgraph";
 import {FhirBundle} from "./fhirBundle.mjs";
+import {Trends} from "./trend.mjs";
 
 export const State = Annotation.Root({
   query: Annotation<string>(),
@@ -15,8 +16,9 @@ export const State = Annotation.Root({
     default: () => ({})
   }),
 
-  route: Annotation<"fetch" | "summarize" | "unknown">(),
+  route: Annotation<"metrics" | "fetch" | "summarize" | "unknown">(),
   bundle: Annotation<FhirBundle>(),
+  trends: Annotation<Trends>,
   summary: Annotation<string>(),
 });
 
