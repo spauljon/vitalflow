@@ -1,15 +1,15 @@
 import type {RunnableConfig} from "@langchain/core/runnables";
 import {ChatOpenAI} from "@langchain/openai";
+import {metricDetails} from "./metrics.mjs";
+import {contentToString} from "./aiShared.mjs";
 import {
   bucketSeries,
   computeStats,
   flagsFromStats,
-  type Frequency,
-  type Series,
+  Frequency,
+  Series,
   Trends
-} from "./trend.mjs";
-import {metricDetails} from "./metrics.mjs";
-import {contentToString} from "./aiShared.mjs";
+} from "./trend-math.mjs";
 
 export type SummarizerState = {
   params?: { patientId?: string; codes?: string[] };
@@ -76,36 +76,12 @@ function observationsToSeries(items: any[], requestedCodes: string[]): Series[] 
   return createSeries(by, requestedCodes);
 }
 
-function deterministicSummary(trends: Trends) {
-  const nSeries = trends.series.length;
-  const nPoints = trends.series.reduce((a, s) => a + s.points.length, 0);
-  const lines = [
-    `**Data coverage:** ${nPoints} points across ${nSeries} codes.`,
-  ];
-  if (trends.flags?.length) {
-    lines.push("**Flags:**");
-    for (const f of trends.flags) {
-      lines.push(`- [${f.severity}] ${f.rule} — ${f.evidence}`);
-    }
-  } else {
-    lines.push("No safety flags detected.");
-  }
-  // add last values
-  for (const st of trends.stats) {
-    if (st.latest != null) {
-      lines.push(
-        `- ${st.display ?? st.code}: latest ${st.latest}${st.unit ? " " + st.unit : ""} @ ${st.latestAt ?? "unknown"}`);
-    }
-  }
-  return lines.join("\n");
-}
-
 async function summarizeTrends(llm: ChatOpenAI | undefined,
                                s: SummarizerState,
                                trends: Trends,
                                pid: string | undefined) {
   if (!llm) {
-    return {...s, summary: deterministicSummary(trends)};
+    return {...s, summary: "not available"};
   }
   const prompt = [
     {
@@ -131,14 +107,14 @@ Write a brief summary:
 
   try {
     const res = await llm.invoke(prompt);
-    return {...s, summary: contentToString(res).trim() || deterministicSummary(trends)};
+    return {...s, summary: contentToString(res).trim()};
   } catch {
-    return {...s, summary: deterministicSummary(trends)};
+    return {...s, summary: "not available"};
   }
 }
 
 async function summarizeObservations(items: any[], s: SummarizerState,
-                                     bucketForFallback: "auto" | "hourly" | "daily" | "weekly",
+                                     bucketForFallback: Frequency,
                                      llm: ChatOpenAI | undefined,
                                      pid: string | undefined) {
   let series = observationsToSeries(items, s.params?.codes ?? []);
@@ -146,9 +122,8 @@ async function summarizeObservations(items: any[], s: SummarizerState,
   const stats = series.map(computeStats);
   const flags = flagsFromStats(stats);
 
-  const trends: Trends = {series, stats, flags, raw: {fetchedCount: items.length}};
   if (!llm) {
-    return {...s, summary: deterministicSummary(trends)};
+    return {...s, summary: "not available"};
   }
   const prompt = [
     {
@@ -175,9 +150,9 @@ Write a brief summary:
   try {
     const res = await llm.invoke(prompt);
 
-    return {...s, summary: contentToString(res).trim() || deterministicSummary(trends)};
+    return {...s, summary: contentToString(res).trim() };
   } catch {
-    return {...s, summary: deterministicSummary(trends)};
+    return {...s, summary: "not available"};
   }
 }
 
@@ -204,10 +179,6 @@ export function makeSummarizerNode(opts?: {
 
     if (s.route === "metrics") {
       return metricDetails(s);
-    }
-
-    if (s.trends?.series?.length) {
-      return await summarizeTrends(llm, s, s.trends, pid);
     }
 
     const items = s.bundle?.entry ?? [];

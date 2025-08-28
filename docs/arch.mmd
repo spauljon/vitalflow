@@ -1,0 +1,26 @@
+flowchart LR
+    U[User / Caller] -->|NL query + params| VF
+
+subgraph VF [VitalFlow Orchestrator &#40LangGraph&#41]
+INTAKE[Intake<br/>normalize query \u2192 params]
+PLANNER[Planner<br/>LLM routes: fetch 0x7C metrics 0x7C summarize 0x7C alert]
+DATA[data_agent<br/>&#40MCP FHIR client&#41]
+TREND[Trend<br/>&#40compute series/stats/flags&#41]
+SUM[Summarizer<br/>LLM or deterministic]
+end
+
+VF --> MCP_FHIR
+U --> VF
+
+INTAKE --> PLANNER
+PLANNER -->|fetch| DATA
+PLANNER -->|metrics| DATA
+PLANNER -->|summarize| TREND
+PLANNER -->|alert| DATA
+
+DATA --> SUM
+DATA --> TREND
+TREND --> SUM
+SUM --> U
+
+MCP_FHIR[["MCP FHIR Server"]]

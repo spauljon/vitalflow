@@ -1,6 +1,18 @@
 import {Annotation} from "@langchain/langgraph";
 import {FhirBundle} from "./fhirBundle.mjs";
-import {Trends} from "./trend.mjs";
+import {Trends} from "./trend-math.mjs";
+import {z} from "zod";
+
+export const IntentSchema = z.enum([
+  "trend",
+  "metrics",
+  "fetch",
+  "summarize",
+  "alert",
+  "unknown",
+]);
+
+export type Intent = z.infer<typeof IntentSchema>;
 
 export const State = Annotation.Root({
   query: Annotation<string>(),
@@ -16,7 +28,7 @@ export const State = Annotation.Root({
     default: () => ({})
   }),
 
-  route: Annotation<"metrics" | "fetch" | "summarize" | "unknown">(),
+  route: Annotation<Intent>(),
   bundle: Annotation<FhirBundle>(),
   trends: Annotation<Trends>,
   summary: Annotation<string>(),

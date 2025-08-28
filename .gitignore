@@ -6,6 +6,7 @@ npm-debug.log
 .env
 .idea/
 package-lock.json
+smoketest-output.md
 
 # TypeScript
 *.tsbuildinfo

@@ -2,9 +2,10 @@ import {ChatOpenAI} from "@langchain/openai";
 import {StructuredOutputParser} from "@langchain/core/output_parsers";
 import {z} from "zod";
 import {contentToString} from "./aiShared.mjs";
+import {IntentSchema} from "./state.mjs";
 
 const PlannerSchema = z.object({
-  route: z.enum(["metrics", "fetch", "summarize", "alert", "unknown"]),
+  route: IntentSchema,
   rationale: z.string(),
   /** Only set fields you are certain about. Never invent PHI. */
   params_patch: z
@@ -33,10 +34,10 @@ Rules:
 Routing:
 - Use "fetch" when patientId + codes are present or can be inferred with high confidence,
   and the user is asking for observations to be retrieved for further processing.
-- Use "metrics" when the user explicitly asks to see **raw observations or tabular metrics** 
+- Use "metrics" when the user explicitly asks to see raw observations or tabular metrics
   (e.g., "raw values", "metrics table", "show readings", "export as CSV/JSON").
-- Use "summarize" when the request is about summarizing or analyzing already-fetched 
-  observations/trends rather than listing the raw values.
+- Use "trend" when either 'trend', 'trends', or 'visualize' appear in the user's query/context.
+- Use "fetch" when the request is about summarizing.
 - Use "alert" if the request clearly asks to check threshold flags or highlight abnormal values.
 - If unsure, set route="unknown" and list needed fields in "missing".
 
