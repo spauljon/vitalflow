@@ -3,7 +3,7 @@ import {z} from "zod";
 
 import {stateGraph as vitalflow} from "./graph.mjs";
 
-export const server = new McpServer({ name: "vitalflow", version: "0.1.0" });
+export const server = new McpServer({name: "vitalflow", version: "0.1.0"});
 
 const RunInput = {
   threadId: z.string().default("vf-thread-1"),
@@ -14,23 +14,53 @@ const RunInput = {
 };
 
 server.registerTool(
-  "vitalflow.run",
+  "vitalflow-run",
   {
-    title: "Run VitalFlow",
-    description: "Execute the intake → planner → data_agent → trend (chart) flow and return the" +
-      " Markdown/graph or summarized output.",
+    title: "Patient Health Vitals and Trends",
+    description: `
+Query, analyze, and visualize patient health metrics (e.g., blood pressure, heart rate, SpO₂) 
+from FHIR data. Supports multiple modes:
+
+- **fetch**: Retrieve observations by patient and LOINC code.
+- **metrics**: Show raw observations in a Markdown table.
+- **summarize**: Provide narrative summaries of recent readings.
+- **visualize**: Render graphs (e.g., grouped bars for systolic/diastolic blood pressure).
+- **alert**: Flag threshold crossings or abnormal values.
+
+Use this tool whenever a user asks for vitals, health metrics, trends, summaries, tables, or 
+graphs for a specific patient. 
+
+Input: natural language query only, no params.
+Output: Markdown (tables or charts) and JSON summary.
+    `.trim(),
     inputSchema: RunInput
   },
-  async ({ threadId, input }) => {
-    const out = await vitalflow.invoke(input, {
-      configurable: { thread_id: threadId }
-    });
-    const payload = {
-      summary: out.summary ?? "",
-      params: input.params ?? {},
-      // include a little structured data if you want:
-      trends: out.trends ? { statsCount: out.trends.stats?.length ?? 0, seriesCount: out.trends.series?.length ?? 0 } : undefined
-    };
-    return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+  async ({threadId, input}) => {
+    try {
+      const out = await vitalflow.invoke(input, { configurable: { thread_id: threadId } });
+      if (out.chart) {
+        if (out.chart.kind === "png") {
+          const b64 = Buffer.from(out.chart.bytes).toString("base64");
+          return {
+            content: [
+              { type: "image", data: b64, mimeType: "image/png" },
+            ],
+          };
+        }
+      }
+
+      return {
+        content: [{ type: "text", text: out.summary ?? "No output" }],
+      };
+    } catch (err: any) {
+      console.error("[vitalflow-run] tool error:", err?.stack ?? err);
+      return {
+        isError: true,
+        content: [{ type: "text", text: `VitalFlow error: ${err?.message ?? "Unknown error"}` }],
+      };
+    }
   }
 );
+
+process.on("unhandledRejection", (e) => console.error("unhandledRejection", e));
+process.on("uncaughtException", (e) => console.error("uncaughtException", e));

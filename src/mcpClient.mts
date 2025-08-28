@@ -34,6 +34,7 @@ export class McpHttpClient {
       }
     };
 
+    console.error("[MCP FHIR] POST", this.baseUrl);
     const res = await fetch(this.baseUrl, {
       method: "POST",
       headers: this.headers(),

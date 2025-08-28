@@ -12,18 +12,13 @@ if (isSmokeTest()) {
   (async () => {
     const out = await stateGraph.invoke(
       {
-        query: "patient test-patient-0003 trend analysis of bp readings since 2025-01-01",
+        query: "blood pressure visualize for patient test-patient-0003 since 2025-01-01",
         params: {}, // optional initial params
       },
       {configurable: {thread_id: "demo-thread-1"}} // enables checkpointing per thread
     );
 
     console.log("SUMMARY:\n", out.summary);
-
-    // also write to a file (overwrite each run)
-    writeFileSync("smoketest-output.md", out.summary ?? "", "utf8");
-
-    console.log("Wrote output to smoketest-output.md");
   })();
 } else {
   startStdio(server);

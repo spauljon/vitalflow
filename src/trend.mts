@@ -1,8 +1,16 @@
-import type { RunnableConfig } from "@langchain/core/runnables";
+import type {RunnableConfig} from "@langchain/core/runnables";
 import * as vega from "vega";
 import * as vl from "vega-lite";
-import { bucketSeries, computeStats, flagsFromStats, type Series, type Frequency } from "./trend-math.mjs";
+import {
+  bucketSeries,
+  computeStats,
+  flagsFromStats,
+  type Series,
+  type Frequency
+} from "./trend-math.mjs";
 import {McpHttpClient} from "./mcpClient.mjs";
+import {writeFileSync} from "node:fs";
+import {Canvas} from "canvas";
 
 export type TrendState = {
   params?: {
@@ -21,7 +29,8 @@ export type TrendState = {
     raw: { fetchedCount: number };
     query: any;
   };
-  summary?: string;               // we'll set this to the chart markdown
+  summary?: string;
+  chart?: any;
 };
 
 const LOINC_SYS = "http://loinc.org|8480-6";
@@ -32,10 +41,15 @@ function latestPerDay(points: { t: string; v: number }[]) {
   const map = new Map<string, { t: string; v: number }>();
   for (const p of points) {
     const d = new Date(p.t);
-    if (isNaN(+d)) continue;
-    const dayIso = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString();
+    if (isNaN(+d)) {
+      continue;
+    }
+    const dayIso = new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString();
     const prev = map.get(dayIso);
-    if (!prev || +new Date(p.t) > +new Date(prev.t)) map.set(dayIso, p);
+    if (!prev || +new Date(p.t) > +new Date(prev.t)) {
+      map.set(dayIso, p);
+    }
   }
   return [...map.values()].sort((a, b) => a.t.localeCompare(b.t));
 }
@@ -44,7 +58,9 @@ function latestPerDay(points: { t: string; v: number }[]) {
 function buildBpRows(series: Series[]) {
   const sys = series.find(s => s.code === LOINC_SYS);
   const dia = series.find(s => s.code === LOINC_DIA);
-  if (!sys?.points?.length && !dia?.points?.length) return [];
+  if (!sys?.points?.length && !dia?.points?.length) {
+    return [];
+  }
 
   const sysDaily = sys?.points?.length ? latestPerDay(sys.points) : [];
   const diaDaily = dia?.points?.length ? latestPerDay(dia.points) : [];
@@ -61,8 +77,12 @@ function buildBpRows(series: Series[]) {
 
   const rows: { date: string; component: "Systolic" | "Diastolic"; value: number }[] = [];
   for (const [date, v] of byDate) {
-    if (v.SYS != null) rows.push({ date, component: "Systolic", value: v.SYS });
-    if (v.DIA != null) rows.push({ date, component: "Diastolic", value: v.DIA });
+    if (v.SYS != null) {
+      rows.push({date, component: "Systolic", value: v.SYS});
+    }
+    if (v.DIA != null) {
+      rows.push({date, component: "Diastolic", value: v.DIA});
+    }
   }
   rows.sort((a, b) => a.date.localeCompare(b.date));
   return rows;
@@ -70,10 +90,16 @@ function buildBpRows(series: Series[]) {
 
 /** Simple obs → series normalizer (matches your earlier shape) */
 function normalizeToSeries(items: any[], requestedCodes: string[]): Series[] {
-  const by = new Map<string, { display?: string; unit?: string | null; points: { t: string; v: number }[] }>();
+  const by = new Map<string, {
+    display?: string;
+    unit?: string | null;
+    points: { t: string; v: number }[]
+  }>();
   for (const it of items) {
     const v = it?.value ?? it?.valueQuantity?.value;
-    if (typeof v !== "number" || !Number.isFinite(v)) continue;
+    if (typeof v !== "number" || !Number.isFinite(v)) {
+      continue;
+    }
 
     const code =
       it?.loinc ? `http://loinc.org|${it.loinc}` :
@@ -82,20 +108,32 @@ function normalizeToSeries(items: any[], requestedCodes: string[]): Series[] {
 
     const when = it?.when ?? it?.effectiveDateTime ?? it?.issued;
     const iso = when ? new Date(when).toISOString() : undefined;
-    if (!iso || isNaN(+new Date(iso))) continue;
+    if (!iso || isNaN(+new Date(iso))) {
+      continue;
+    }
 
-    if (!by.has(code)) by.set(code, { display: it?.code?.display, unit: it?.unit ?? it?.valueQuantity?.unit ?? null, points: [] });
-    by.get(code)!.points.push({ t: iso, v });
+    if (!by.has(code)) {
+      by.set(code,
+        {
+          display: it?.code?.display,
+          unit: it?.unit ?? it?.valueQuantity?.unit ?? null,
+          points: []
+        });
+    }
+    by.get(code)!.points.push({t: iso, v});
   }
 
   const out: Series[] = [];
-  for (const [code, { display, unit, points }] of by) {
-    points.sort((a,b)=>a.t.localeCompare(b.t));
+  for (const [code, {display, unit, points}] of by) {
+    points.sort((a, b) => a.t.localeCompare(b.t));
     const keyNoScheme = code.includes("|") ? code : `http://loinc.org|${code}`;
-    if (requestedCodes.length && !requestedCodes.includes(code) && !requestedCodes.includes(keyNoScheme)) continue;
-    out.push({ code, display, unit, points });
+    if (requestedCodes.length && !requestedCodes.includes(code) && !requestedCodes.includes(
+      keyNoScheme)) {
+      continue;
+    }
+    out.push({code, display, unit, points});
   }
-  out.sort((a,b)=>a.code.localeCompare(b.code));
+  out.sort((a, b) => a.code.localeCompare(b.code));
   return out;
 }
 
@@ -121,13 +159,14 @@ export function makeTrendNode(opts?: {
     const patientId = s.params?.patientId;
     const codes = s.params?.codes ?? [];
     if (!patientId || codes.length === 0) {
-      return { ...s, summary: "Missing patientId or codes for trend visualization." };
+      return {...s, summary: "Missing patientId or codes for trend visualization."};
     }
 
     let items: any[] = [];
     if (fhirClient) {
       await fhirClient.ensureSession();
-      const since = s.params?.since ?? new Date(Date.now() - defaultWindowDays*86400000).toISOString();
+      const since = s.params?.since ?? new Date(
+        Date.now() - defaultWindowDays * 86400000).toISOString();
       const until = s.params?.until;
       const resp = await fhirClient.callTool("fhir.search_observations", {
         patientId,
@@ -143,7 +182,7 @@ export function makeTrendNode(opts?: {
     }
 
     if (!items.length) {
-      return { ...s, summary: "No observations available for trend visualization." };
+      return {...s, summary: "No observations available for trend visualization."};
     }
 
     let series = normalizeToSeries(items, codes);
@@ -158,7 +197,13 @@ export function makeTrendNode(opts?: {
     if (!rows.length) {
       return {
         ...s,
-        trends: { series, stats, flags, raw: { fetchedCount: items.length }, query: { patientId, codes } },
+        trends: {
+          series,
+          stats,
+          flags,
+          raw: {fetchedCount: items.length},
+          query: {patientId, codes}
+        },
         summary: "No blood pressure series found (need LOINC 8480-6 and 8462-4)."
       };
     }
@@ -169,32 +214,52 @@ export function makeTrendNode(opts?: {
       description: "Blood Pressure — Systolic/Diastolic (stacked, daily latest)",
       width: 720,
       height: 360,
-      data: { values: rows },
-      mark: { type: "bar" },
+      data: {values: rows},
+      mark: {type: "bar"},
       encoding: {
-        x: { field: "date", type: "ordinal", title: "Date" },
-        xOffset: { field: "component" },  // side-by-side bars
-        y: { field: "value", type: "quantitative", title: "mmHg" },
-        color: { field: "component", type: "nominal", title: "Component" },
+        x: {field: "date", type: "ordinal", title: "Date"},
+        xOffset: {field: "component"},  // side-by-side bars
+        y: {field: "value", type: "quantitative", title: "mmHg"},
+        color: {field: "component", type: "nominal", title: "Component"},
         tooltip: [
-          { field: "date", title: "Date" },
-          { field: "component", title: "Component" },
-          { field: "value", title: "mmHg" }
+          {field: "date", title: "Date"},
+          {field: "component", title: "Component"},
+          {field: "value", title: "mmHg"}
         ]
       }
     };
 
     const compiled = vl.compile(spec).spec;
-    const view = new vega.View(vega.parse(compiled), { renderer: "none" });
-    const svg = await view.toSVG();
-    const svgUri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-    const md = `### Blood Pressure (Daily Latest)\n\n![BP Chart](${svgUri})`;
+    const view = new vega.View(vega.parse(compiled), {
+      renderer: "none",
+      loader: vega.loader(),
+      logLevel: vega.Warn,
+    });
+    const canvas: Canvas = await view.toCanvas() as unknown as Canvas;
+    const png = canvas.toBuffer("image/png");
+    const chart = { kind: "png", bytes: new Uint8Array(png), caption: "Blood Pressure — grouped" +
+        " bars (daily latest)" };
 
-    // 6) Return: stash trends for later; put SVG markdown in summary
+
+    writeFileSync("last-chart.png", png);
+
     return {
       ...s,
       trends: { series, stats, flags, raw: { fetchedCount: items.length }, query: { patientId, codes } },
-      summary: md
+      // keep summary text if you want a caption in your state
+      summary: "Blood Pressure (Daily Latest) — grouped bars",
+      chart
     };
+
+    // const svg = await view.toSVG();
+    // const svgUri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+    // const md = `### Blood Pressure (Daily Latest)\n\n![BP Chart](${svgUri})`;
+    //
+    // // 6) Return: stash trends for later; put SVG markdown in summary
+    // return {
+    //   ...s,
+    //   trends: { series, stats, flags, raw: { fetchedCount: items.length }, query: { patientId, codes } },
+    //   summary: md
+    // };
   };
 }

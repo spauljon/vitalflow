@@ -3,6 +3,10 @@ import {FhirBundle} from "./fhirBundle.mjs";
 import {Trends} from "./trend-math.mjs";
 import {z} from "zod";
 
+export type ChartPayload =
+  | { kind: "png"; bytes: Uint8Array; caption?: string }
+  | { kind: "svg"; text: string; caption?: string };
+
 export const IntentSchema = z.enum([
   "trend",
   "metrics",
@@ -32,5 +36,6 @@ export const State = Annotation.Root({
   bundle: Annotation<FhirBundle>(),
   trends: Annotation<Trends>,
   summary: Annotation<string>(),
+  chart: Annotation<ChartPayload | undefined>(),
 });
 
